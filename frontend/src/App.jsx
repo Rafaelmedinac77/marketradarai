@@ -656,10 +656,44 @@ function App() {
                     cursor: "pointer",
                   }}
                 >
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <strong>{stock.symbol}</strong>
-                    <span className="positive">${Number(stock.price).toFixed(2)}</span>
-                  </div>
+                  <div
+  style={{
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+  }}
+>
+  <strong>{stock.symbol}</strong>
+
+  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+    <span className="positive">${Number(stock.price).toFixed(2)}</span>
+
+    <button
+      onClick={(e) => {
+        e.stopPropagation()
+
+        setWatchlist((prev) =>
+          prev.filter((item) => item.symbol !== stock.symbol)
+        )
+
+        if (selectedSymbol === stock.symbol) {
+          setSelectedSymbol("NVDA")
+        }
+      }}
+      style={{
+        background: "transparent",
+        border: "none",
+        color: "#ef4444",
+        cursor: "pointer",
+        fontSize: "14px",
+        fontWeight: "bold",
+        padding: "2px 6px",
+      }}
+    >
+      ✕
+    </button>
+  </div>
+</div>
                   <small style={{ color: "#94a3b8" }}>{stock.name}</small>
                   <div style={{ marginTop: "6px" }}>
                     <small className="positive">+0.80%</small>
