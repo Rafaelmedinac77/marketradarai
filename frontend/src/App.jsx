@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { createChart, CandlestickSeries, HistogramSeries } from "lightweight-charts"
 
-const MARKET_URL = "http://localhost:5678/webhook/market-data"
-const WATCHLIST_URL = "http://localhost:5678/webhook/watchlist"
+const MARKET_URL = "https://n8n-production-d92c1.up.railway.app/webhook/market-data"
+//const WATCHLIST_URL = "http://localhost:5678/webhook/watchlist"
 
 const CACHE_TTL = 5 * 60 * 1000
 const WATCHLIST_CACHE_TTL = 10 * 60 * 1000
