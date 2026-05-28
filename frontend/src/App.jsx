@@ -7,12 +7,12 @@ const CACHE_TTL = 60 * 1000
 const AUTO_REFRESH_MS = 60 * 1000
 
 const defaultWatchlist = [
-  { symbol: "NVDA", name: "NVIDIA", price: 214.83 },
-  { symbol: "AAPL", name: "Apple", price: 308.38 },
-  { symbol: "MSFT", name: "Microsoft", price: 416.15 },
-  { symbol: "TSLA", name: "Tesla", price: 433.56 },
-  { symbol: "META", name: "Meta Platforms", price: 612.34 },
-  { symbol: "AMZN", name: "Amazon", price: 265.31 },
+  { symbol: "NVDA", name: "NVIDIA", price: 214.83, change: 0 },
+  { symbol: "AAPL", name: "Apple", price: 308.38, change: 0 },
+  { symbol: "MSFT", name: "Microsoft", price: 416.15, change: 0 },
+  { symbol: "TSLA", name: "Tesla", price: 433.56, change: 0 },
+  { symbol: "META", name: "Meta Platforms", price: 612.34, change: 0 },
+  { symbol: "AMZN", name: "Amazon", price: 265.31, change: 0 },
 ]
 
 const names = {
@@ -26,6 +26,7 @@ const names = {
   NFLX: "Netflix",
   PLTR: "Palantir",
   GOOGL: "Alphabet",
+  RACE: "Ferrari",
 }
 
 function getTimeframeConfig(timeframe) {
@@ -134,6 +135,20 @@ function writeCache(key, data) {
   }
 }
 
+function getMarketStatus() {
+  const now = new Date()
+  const utcHour = now.getUTCHours()
+  const utcMinute = now.getUTCMinutes()
+  const totalMinutes = utcHour * 60 + utcMinute
+
+  const nasdaqOpen = 14 * 60 + 30
+  const nasdaqClose = 21 * 60
+
+  return totalMinutes >= nasdaqOpen && totalMinutes <= nasdaqClose
+    ? "NASDAQ OPEN"
+    : "NASDAQ CLOSED"
+}
+
 function App() {
   const [selectedSymbol, setSelectedSymbol] = useState("NVDA")
   const [chartData, setChartData] = useState([])
@@ -145,11 +160,13 @@ function App() {
   const [lastUpdated, setLastUpdated] = useState(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [newSymbol, setNewSymbol] = useState("")
+  const [clock, setClock] = useState(new Date())
 
   const chartContainerRef = useRef(null)
 
   const selectedAsset = watchlist.find((item) => item.symbol === selectedSymbol)
   const selectedPrice = chartData[chartData.length - 1]?.close || selectedAsset?.price || 0
+  const selectedChange = selectedAsset?.change || 0
 
   const ema20 = useMemo(() => calculateEMA(chartData, 20), [chartData])
   const ema50 = useMemo(() => calculateEMA(chartData, 50), [chartData])
@@ -159,27 +176,47 @@ function App() {
   const currentEMA50 = ema50.length ? ema50[ema50.length - 1].toFixed(2) : "--"
 
   const technicalSignal = useMemo(() => {
-    if (!chartData.length) return "Esperando datos"
+    if (!chartData.length) return "WAITING DATA"
 
     const lastClose = Number(chartData[chartData.length - 1].close)
+    const previousClose = Number(chartData[chartData.length - 2]?.close || lastClose)
     const emaFast = Number(currentEMA20)
     const emaSlow = Number(currentEMA50)
 
-    if (rsi > 70) return "Sobrecompra"
-    if (rsi < 30) return "Sobreventa"
-    if (lastClose > emaFast && emaFast > emaSlow) return "Tendencia alcista"
-    if (lastClose < emaFast && emaFast < emaSlow) return "Tendencia bajista"
+    const priceChange = previousClose
+      ? ((lastClose - previousClose) / previousClose) * 100
+      : 0
 
-    return "Neutral"
+    if (rsi > 72) return "SELL SIGNAL"
+    if (rsi < 28) return "BUY SIGNAL"
+    if (lastClose > emaFast && emaFast > emaSlow && priceChange > 0) return "BULLISH TREND"
+    if (lastClose < emaFast && emaFast < emaSlow && priceChange < 0) return "BEARISH TREND"
+    if (Math.abs(priceChange) > 2) return "HIGH MOMENTUM"
+
+    return "WEAK TREND"
   }, [chartData, currentEMA20, currentEMA50, rsi])
 
-  const topGainer = watchlist.reduce((prev, current) =>
-    Number(current.price) > Number(prev.price) ? current : prev
-  )
+  const topGainer = useMemo(() => {
+    return watchlist.reduce((prev, current) =>
+      Number(current.change) > Number(prev.change) ? current : prev
+    )
+  }, [watchlist])
 
-  const topLoser = watchlist.reduce((prev, current) =>
-    Number(current.price) < Number(prev.price) ? current : prev
-  )
+  const topLoser = useMemo(() => {
+    return watchlist.reduce((prev, current) =>
+      Number(current.change) < Number(prev.change) ? current : prev
+    )
+  }, [watchlist])
+
+  const marketStatus = getMarketStatus()
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setClock(new Date())
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [])
 
   const loadMarketData = async ({ force = false } = {}) => {
     const cacheKey = `market-${selectedSymbol}-${timeframe}`
@@ -241,12 +278,22 @@ function App() {
       setChartData(formattedChart)
       writeCache(cacheKey, formattedChart)
 
-      const lastClose = formattedChart[formattedChart.length - 1]?.close || 0
+      const lastClose = Number(formattedChart[formattedChart.length - 1]?.close || 0)
+      const previousClose = Number(
+        formattedChart[formattedChart.length - 2]?.close || lastClose
+      )
+
+      const change =
+        previousClose > 0 ? ((lastClose - previousClose) / previousClose) * 100 : 0
 
       setWatchlist((prev) =>
         prev.map((item) =>
           item.symbol === selectedSymbol
-            ? { ...item, price: Number(lastClose) }
+            ? {
+                ...item,
+                price: Number(lastClose),
+                change: Number(change),
+              }
             : item
         )
       )
@@ -401,6 +448,7 @@ function App() {
           symbol,
           name: names[symbol] || symbol,
           price: 0,
+          change: 0,
         },
       ])
     }
@@ -408,6 +456,15 @@ function App() {
     setSelectedSymbol(symbol)
     setLiveMode(true)
     setNewSymbol("")
+  }
+
+  const removeAsset = (symbol) => {
+    setWatchlist((prev) => prev.filter((item) => item.symbol !== symbol))
+
+    if (selectedSymbol === symbol) {
+      setSelectedSymbol("NVDA")
+      setRefreshKey((prev) => prev + 1)
+    }
   }
 
   const lastUpdatedText = lastUpdated
@@ -418,10 +475,19 @@ function App() {
       })
     : "--:--:--"
 
+  const clockText = clock.toLocaleTimeString("es-ES", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })
+
   const alerts = chartData.length
     ? [
         `${selectedSymbol}: ${technicalSignal}`,
         `${selectedSymbol}: RSI ${Number(rsi).toFixed(2)}`,
+        `${selectedSymbol}: variación ${selectedChange >= 0 ? "+" : ""}${Number(
+          selectedChange
+        ).toFixed(2)}%`,
         `Última actualización: ${lastUpdatedText}`,
       ]
     : [`${selectedSymbol}: esperando datos reales OHLC`]
@@ -439,7 +505,7 @@ function App() {
         <div className="logo-section">
           <div>
             <h1>📈 MarketRadarAI</h1>
-            <p>Seguimiento inteligente de mercados financieros</p>
+            <p>AI Financial Terminal</p>
           </div>
         </div>
 
@@ -460,12 +526,56 @@ function App() {
         </div>
       </nav>
 
+      <section
+        style={{
+          margin: "20px 0",
+          padding: "18px 22px",
+          borderRadius: "20px",
+          border: "1px solid rgba(34,197,94,0.35)",
+          background:
+            "linear-gradient(135deg, rgba(15,23,42,0.96), rgba(2,6,23,0.96))",
+          boxShadow: liveMode
+            ? "0 0 35px rgba(34,197,94,0.22)"
+            : "0 0 25px rgba(148,163,184,0.08)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "16px",
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div
+            style={{
+              color: liveMode ? "#22c55e" : "#94a3b8",
+              fontWeight: "800",
+              letterSpacing: "0.12em",
+              fontSize: "13px",
+            }}
+          >
+            ● LIVE MARKET
+          </div>
+          <h2 style={{ margin: "6px 0 0", color: "#f8fafc" }}>
+            {marketStatus}
+          </h2>
+          <p style={{ margin: "4px 0 0", color: "#94a3b8" }}>
+            Última actualización {lastUpdatedText}
+          </p>
+        </div>
+
+        <div style={{ textAlign: "right" }}>
+          <strong style={{ color: "#f8fafc", fontSize: "28px" }}>{clockText}</strong>
+          <p style={{ margin: "4px 0 0", color: "#94a3b8" }}>
+            {selectedSymbol} · {timeframe} · {technicalSignal}
+          </p>
+        </div>
+      </section>
+
       <div className="status-bar">
         <strong style={{ color: liveMode ? "#22c55e" : "#94a3b8" }}>
           {liveMode ? "● LIVE ON" : "● LIVE OFF"}
         </strong>
         <span style={{ marginLeft: "12px" }}>{connectionStatus}</span>
-        <span style={{ marginLeft: "12px" }}>Última actualización: {lastUpdatedText}</span>
         {isLoading && <span style={{ marginLeft: "12px" }}>Actualizando...</span>}
 
         <button onClick={() => setLiveMode((prev) => !prev)} style={{ marginLeft: "12px" }}>
@@ -480,25 +590,27 @@ function App() {
       <section className="hero">
         <div>
           <p className="eyebrow">Estado general del mercado</p>
-          <h2>Mercado tecnológico con sesgo positivo</h2>
+          <h2>Terminal financiera inteligente en tiempo real</h2>
           <p>
             Dashboard conectado a n8n, Railway y Twelve Data. Consulta datos reales,
-            calcula indicadores técnicos y mantiene controlado el consumo de API.
+            calcula indicadores técnicos y genera señales automáticas sobre datos OHLC.
           </p>
         </div>
 
         <div className="hero-stats">
           <div>
             <span>Sentimiento</span>
-            <strong className="positive">Alcista</strong>
+            <strong className={selectedChange >= 0 ? "positive" : "negative"}>
+              {selectedChange >= 0 ? "Alcista" : "Bajista"}
+            </strong>
           </div>
           <div>
             <span>Volatilidad</span>
-            <strong>Moderada</strong>
+            <strong>{Math.abs(selectedChange) > 2 ? "Alta" : "Moderada"}</strong>
           </div>
           <div>
-            <span>Sector líder</span>
-            <strong>Tecnología</strong>
+            <span>Señal IA</span>
+            <strong>{technicalSignal}</strong>
           </div>
         </div>
       </section>
@@ -518,25 +630,33 @@ function App() {
       <section className="market-summary">
         <div className="summary-card">
           <span>Mercado</span>
-          <strong className="positive">ABIERTO</strong>
+          <strong className={marketStatus.includes("OPEN") ? "positive" : "negative"}>
+            {marketStatus.includes("OPEN") ? "ABIERTO" : "CERRADO"}
+          </strong>
         </div>
 
         <div className="summary-card">
           <span>Activo más fuerte</span>
           <strong>{topGainer.symbol}</strong>
-          <p>${Number(topGainer.price).toFixed(2)}</p>
+          <p className={topGainer.change >= 0 ? "positive" : "negative"}>
+            {topGainer.change >= 0 ? "+" : ""}
+            {Number(topGainer.change).toFixed(2)}%
+          </p>
         </div>
 
         <div className="summary-card">
           <span>Activo más débil</span>
           <strong>{topLoser.symbol}</strong>
-          <p>${Number(topLoser.price).toFixed(2)}</p>
+          <p className={topLoser.change >= 0 ? "positive" : "negative"}>
+            {topLoser.change >= 0 ? "+" : ""}
+            {Number(topLoser.change).toFixed(2)}%
+          </p>
         </div>
 
         <div className="summary-card">
           <span>Señal técnica</span>
           <strong>{technicalSignal}</strong>
-          <p>Calculada con RSI y medias exponenciales.</p>
+          <p>Calculada con RSI, EMA20, EMA50 y cambio de precio.</p>
         </div>
       </section>
 
@@ -575,7 +695,15 @@ function App() {
               <h2>🕯️ Velas japonesas + Volumen - {selectedSymbol}</h2>
               <p>Histórico OHLC real recibido desde n8n y Twelve Data.</p>
             </div>
-            <strong className="positive">${Number(selectedPrice).toFixed(2)}</strong>
+            <div style={{ textAlign: "right" }}>
+              <strong className={selectedChange >= 0 ? "positive" : "negative"}>
+                ${Number(selectedPrice).toFixed(2)}
+              </strong>
+              <p className={selectedChange >= 0 ? "positive" : "negative"}>
+                {selectedChange >= 0 ? "+" : ""}
+                {Number(selectedChange).toFixed(2)}%
+              </p>
+            </div>
           </div>
 
           <div className="symbol-buttons">
@@ -641,6 +769,7 @@ function App() {
           <div style={{ display: "grid", gap: "10px" }}>
             {watchlist.map((stock) => {
               const active = stock.symbol === selectedSymbol
+              const isPositive = Number(stock.change) >= 0
 
               return (
                 <button
@@ -657,46 +786,46 @@ function App() {
                   }}
                 >
                   <div
-  style={{
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-  }}
->
-  <strong>{stock.symbol}</strong>
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                    }}
+                  >
+                    <strong>{stock.symbol}</strong>
 
-  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-    <span className="positive">${Number(stock.price).toFixed(2)}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span className={isPositive ? "positive" : "negative"}>
+                        ${Number(stock.price).toFixed(2)}
+                      </span>
 
-    <button
-      onClick={(e) => {
-        e.stopPropagation()
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          removeAsset(stock.symbol)
+                        }}
+                        style={{
+                          background: "transparent",
+                          border: "none",
+                          color: "#ef4444",
+                          cursor: "pointer",
+                          fontSize: "14px",
+                          fontWeight: "bold",
+                          padding: "2px 6px",
+                        }}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
 
-        setWatchlist((prev) =>
-          prev.filter((item) => item.symbol !== stock.symbol)
-        )
-
-        if (selectedSymbol === stock.symbol) {
-          setSelectedSymbol("NVDA")
-        }
-      }}
-      style={{
-        background: "transparent",
-        border: "none",
-        color: "#ef4444",
-        cursor: "pointer",
-        fontSize: "14px",
-        fontWeight: "bold",
-        padding: "2px 6px",
-      }}
-    >
-      ✕
-    </button>
-  </div>
-</div>
                   <small style={{ color: "#94a3b8" }}>{stock.name}</small>
+
                   <div style={{ marginTop: "6px" }}>
-                    <small className="positive">+0.80%</small>
+                    <small className={isPositive ? "positive" : "negative"}>
+                      {isPositive ? "↗ +" : "↘ "}
+                      {Number(stock.change).toFixed(2)}%
+                    </small>
                   </div>
                 </button>
               )
@@ -721,7 +850,9 @@ function App() {
             <strong>{technicalSignal}</strong>
             <p>
               RSI actual {Number(rsi).toFixed(2)}. EMA20 {currentEMA20}. EMA50{" "}
-              {currentEMA50}. El análisis se calcula sobre datos OHLC reales.
+              {currentEMA50}. Cambio actual{" "}
+              {selectedChange >= 0 ? "+" : ""}
+              {Number(selectedChange).toFixed(2)}%.
             </p>
           </div>
         </section>
